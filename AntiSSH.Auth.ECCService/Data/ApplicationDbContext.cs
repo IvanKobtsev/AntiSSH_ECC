@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace AntiSSH.Auth.ECC.Data;
 
 public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-    : IdentityDbContext<User, IdentityRole<Guid>, Guid>(options)
+    : DbContext(options)
 {
     public DbSet<EncryptedKey> EncryptedKeys { get; set; }
+    public DbSet<User> Users { get; set; }
 }

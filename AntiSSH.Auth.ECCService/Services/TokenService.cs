@@ -74,12 +74,12 @@ public class TokenService(
         return null;
     }
 
-    private static string Base64Url(byte[] input)
+    public static string Base64Url(byte[] input)
     {
         return Convert.ToBase64String(input).Replace("+", "-").Replace("/", "_").TrimEnd('=');
     }
 
-    private static byte[] Base64UrlDecode(string input)
+    public static byte[] Base64UrlDecode(string input)
     {
         input = input.Replace("-", "+").Replace("_", "/");
         switch (input.Length % 4)
@@ -112,7 +112,7 @@ public class TokenService(
             ?? throw new InvalidOperationException("Encrypted key not found in the database");
 
         return PrivateKeyService.DecryptPrivateKey(
-            encryptedKey.Key,
+            encryptedKey.PrivateKey,
             passphrase,
             encryptedKey.Salt,
             encryptedKey.Iv

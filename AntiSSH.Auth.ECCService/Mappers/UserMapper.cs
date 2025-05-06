@@ -5,17 +5,14 @@ namespace AntiSSH.Auth.ECC.Mappers;
 
 public static class UserMapper
 {
-    public static ProfileDto ToDto(this User user, List<string> roles)
+    public static ProfileDto ToDto(this User user)
     {
         return new ProfileDto
         {
             Id = user.Id,
-            FirstName = user.FirstName,
-            LastName = user.LastName,
-            Patronymic = user.Patronymic,
-            Email = user.Email!,
-            PhoneNumber = user.PhoneNumber,
-            Roles = roles
+            Username = user.Username,
+            Email = user.Email,
+            Fullname = user.FullName,
         };
     }
 
@@ -23,12 +20,9 @@ public static class UserMapper
     {
         return new User
         {
-            UserName = userDto.Email,
+            Username = userDto.Username,
             Email = userDto.Email,
-            FirstName = userDto.FirstName,
-            LastName = userDto.LastName,
-            Patronymic = userDto.Patronymic ?? string.Empty,
-            PhoneNumber = userDto.PhoneNumber ?? string.Empty
+            FullName = userDto.FullName,
         };
     }
 }

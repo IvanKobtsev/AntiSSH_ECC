@@ -13,7 +13,13 @@ public class AuthController(UserService userService) : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
     {
-        return (await userService.Login(loginDto)).GetActionResult();
+        return (await userService.GetNonce(loginDto)).GetActionResult();
+    }
+
+    [HttpPost("sign")]
+    public async Task<IActionResult> Sign([FromBody] UserSignatureDto userSignature)
+    {
+        return (await userService.Login(userSignature)).GetActionResult();
     }
 
     [HttpPost("register")]

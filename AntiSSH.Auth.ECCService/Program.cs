@@ -18,6 +18,17 @@ using Newtonsoft.Json.Converters;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(
+        "AllowAll",
+        policy =>
+        {
+            policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+        }
+    );
+});
+
 builder
     .Services.AddControllers()
     .AddJsonOptions(x =>
@@ -60,11 +71,6 @@ builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<CustomEcdsaService>();
 
 builder
-    .Services.AddIdentity<User, IdentityRole<Guid>>()
-    .AddEntityFrameworkStores<ApplicationDbContext>()
-    .AddDefaultTokenProviders();
-
-builder
     .Services.AddControllers()
     .AddJsonOptions(x =>
     {
@@ -86,6 +92,8 @@ builder
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+app.UseCors("AllowAll");
 
 using (var scope = app.Services.CreateScope())
 {
@@ -120,7 +128,7 @@ using (var scope = app.Services.CreateScope())
                 new EncryptedKey
                 {
                     Id = Guid.NewGuid(),
-                    Key = encryptedPrivateKey,
+                    PrivateKey = encryptedPrivateKey,
                     Salt = salt,
                     Iv = iv,
                     Name = "ECCPrivateKey",

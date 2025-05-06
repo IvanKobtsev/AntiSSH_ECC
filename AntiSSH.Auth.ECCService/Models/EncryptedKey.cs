@@ -8,7 +8,9 @@ public class EncryptedKey
 
     [MaxLength(50)]
     public required string Name { get; set; }
-    public required byte[] Key { get; set; }
+    public required byte[] PrivateKey { get; set; }
+    public byte[]? PublicKey { get; set; }
     public required byte[] Salt { get; set; }
     public required byte[] Iv { get; set; }
+    public string? LastNonce { get; set; }
 }

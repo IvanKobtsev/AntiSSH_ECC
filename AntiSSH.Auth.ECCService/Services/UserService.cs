@@ -6,40 +6,92 @@ using AntiSSH.Auth.ECC.Mappers;
 using AntiSSH.Auth.ECC.Models;
 using AntiSSH.Auth.ECC.Utilities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace AntiSSH.Auth.ECC.Services;
 
-public class UserService(
-    UserManager<User> userManager,
-    ApplicationDbContext dbContext,
-    TokenService tokenService
-)
+public class UserService(ApplicationDbContext dbContext, TokenService tokenService)
 {
+    public async Task<Result<ChallengeDto>> GetNonce(LoginDto loginDto)
+    {
+        var foundUser = await dbContext
+            .Users.Include(u => u.EncryptedKey)
+            .FirstOrDefaultAsync(u => u.Username == loginDto.Username);
+
+        if (foundUser == null)
+            return new Result<ChallengeDto>
+            {
+                Message = "Invalid credentials",
+                Code = HttpCode.BadRequest,
+            };
+
+        if (foundUser.EncryptedKey?.PublicKey == null)
+        {
+            throw new InvalidOperationException("Invalid data in database");
+        }
+
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+        foundUser.EncryptedKey.LastNonce = nonce;
+        await dbContext.SaveChangesAsync();
+
+        var challenge = new ChallengeDto
+        {
+            Nonce = nonce,
+            EncryptedKey = new EncryptedKeyDto
+            {
+                EncryptedPrivateKey = TokenService.Base64Url(foundUser.EncryptedKey.PrivateKey),
+                Iv = TokenService.Base64Url(foundUser.EncryptedKey.Iv),
+                Salt = TokenService.Base64Url(foundUser.EncryptedKey.Salt),
+                PublicKey = TokenService.Base64Url(foundUser.EncryptedKey.PublicKey),
+            },
+        };
+
+        return new Result<ChallengeDto> { Data = challenge };
+    }
+
     public async Task<Result<ProfileDto>> GetProfileDto(Guid userId)
     {
         var foundUser = await dbContext.Users.FindAsync(userId);
 
-        if (foundUser == null)
-            return new Result<ProfileDto> { Message = "User not found", Code = HttpCode.NotFound };
-
-        var userRoles = (await userManager.GetRolesAsync(foundUser)).ToList();
-
-        return new Result<ProfileDto> { Data = foundUser.ToDto(userRoles) };
+        return foundUser == null
+            ? new Result<ProfileDto> { Message = "User not found", Code = HttpCode.NotFound }
+            : new Result<ProfileDto> { Data = foundUser.ToDto() };
     }
 
-    public async Task<Result<TokenDto>> Login(LoginDto loginDto)
+    public async Task<Result<TokenDto>> Login(UserSignatureDto signatureDto)
     {
-        var foundUser = await userManager.FindByEmailAsync(loginDto.Email);
+        var foundUser = await dbContext
+            .Users.Include(u => u.EncryptedKey)
+            .FirstOrDefaultAsync(u => u.Username == signatureDto.Username);
 
-        if (
-            foundUser == null
-            || !await userManager.CheckPasswordAsync(foundUser, loginDto.Password)
-        )
+        if (foundUser == null)
             return new Result<TokenDto>
             {
                 Message = "Invalid credentials",
                 Code = HttpCode.BadRequest,
             };
+
+        if (foundUser.EncryptedKey?.PublicKey == null)
+        {
+            throw new InvalidOperationException("Invalid data in database");
+        }
+
+        var isValid = SignatureVerifier.VerifySignature(
+            foundUser.EncryptedKey.PublicKey,
+            TokenService.Base64UrlDecode(signatureDto.Nonce),
+            signatureDto.Signature
+        );
+
+        if (!isValid || foundUser.EncryptedKey.LastNonce != signatureDto.Nonce)
+            return new Result<TokenDto>
+            {
+                Message = "Invalid signature",
+                Code = HttpCode.BadRequest,
+            };
+
+        foundUser.EncryptedKey.LastNonce = null;
+        await dbContext.SaveChangesAsync();
 
         return new Result<TokenDto>
         {
@@ -50,70 +102,64 @@ public class UserService(
         };
     }
 
-    public async Task<Result<TokenDto>> CreateUser(RegisterUserDto registerUserDto)
+    public async Task<Result> CreateUser(RegisterUserDto registerUserDto)
     {
-        var result = await userManager.CreateAsync(
-            registerUserDto.ToUser(),
-            registerUserDto.Password
-        );
+        var createdUser = new User
+        {
+            Username = registerUserDto.Username,
+            Email = registerUserDto.Email,
+            FullName = registerUserDto.FullName,
+            Id = Guid.NewGuid(),
+        };
 
-        if (!result.Succeeded)
-            return new Result<TokenDto>
-            {
-                Code = HttpCode.BadRequest,
-                Message = result.Errors.First().Description,
-            };
+        var createdKeyData = new EncryptedKey
+        {
+            Id = Guid.NewGuid(),
+            Name = "UserKey",
+            PrivateKey = TokenService.Base64UrlDecode(
+                registerUserDto.EncryptedKey.EncryptedPrivateKey
+            ),
+            PublicKey = TokenService.Base64UrlDecode(registerUserDto.EncryptedKey.PublicKey),
+            Salt = TokenService.Base64UrlDecode(registerUserDto.EncryptedKey.Salt),
+            Iv = TokenService.Base64UrlDecode(registerUserDto.EncryptedKey.Iv),
+        };
 
-        var createdUser = await userManager.FindByEmailAsync(registerUserDto.Email);
+        createdUser.EncryptedKey = createdKeyData;
 
-        if (createdUser == null)
-            return new Result<TokenDto>
-            {
-                Code = HttpCode.BadRequest,
-                Message = "Something went wrong while creating user",
-            };
+        await dbContext.EncryptedKeys.AddAsync(createdKeyData);
+        await dbContext.Users.AddAsync(createdUser);
+        await dbContext.SaveChangesAsync();
 
-        var token = tokenService.GenerateToken(createdUser.Id.ToString());
+        // var token = tokenService.GenerateToken(createdUser.Id.ToString());
 
-        return new Result<TokenDto> { Data = new TokenDto() { AccessToken = token } };
+        return new Result();
     }
 
     public async Task<Result> UpdateProfile(Guid userId, UpdateProfileDto updateProfileDto)
     {
-        var user = await userManager.FindByIdAsync(userId.ToString());
+        var user = await dbContext.Users.FindAsync(userId);
 
         if (user == null)
             return new Result { Code = HttpCode.NotFound, Message = "User not found" };
 
-        user.UserName = updateProfileDto.Email;
+        user.Username = updateProfileDto.Username;
         user.Email = updateProfileDto.Email;
-        user.FirstName = updateProfileDto.FirstName;
-        user.LastName = updateProfileDto.LastName;
-        user.Patronymic = updateProfileDto.Patronymic;
-        user.PhoneNumber = updateProfileDto.PhoneNumber;
+        user.FullName = updateProfileDto.FullName;
 
-        var result = await userManager.UpdateAsync(user);
+        await dbContext.SaveChangesAsync();
 
-        return !result.Succeeded
-            ? new Result { Code = HttpCode.BadRequest, Message = result.Errors.First().Description }
-            : new Result();
+        return new Result();
     }
 
     public async Task<Result> DeleteProfile(Guid userId)
     {
-        var user = await userManager.FindByIdAsync(userId.ToString());
+        var user = await dbContext.Users.FindAsync(userId);
 
         if (user == null)
             return new Result { Code = HttpCode.NotFound, Message = "User not found" };
 
-        var result = await userManager.DeleteAsync(user);
+        var result = dbContext.Users.Remove(user);
 
-        return result.Succeeded
-            ? new Result()
-            : new Result
-            {
-                Code = HttpCode.BadRequest,
-                Message = result.Errors.First().Description,
-            };
+        return new Result();
     }
 }
