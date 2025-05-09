@@ -36,7 +36,7 @@ public class CustomEcdsaService
         var data = new byte[32];
         random.NextBytes(data);
         var k = new BigInteger(data);
-        return k % (_curve.N - 1) + 1; // Ensure 1 ≤ k < n
+        return k % (_curve.N - 1) + 1;
     }
 
     public (BigInteger, BigInteger) SignMessage(BigInteger privateKey, byte[] data)
